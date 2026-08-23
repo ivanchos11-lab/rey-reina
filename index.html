@@ -153,7 +153,22 @@ hr{border:none;border-top:1px solid var(--line);margin:18px 0}
   <div id="voteStatus" class="notice">Cargando estado de la votación…</div>
   <div style="margin-top:18px">
     <button class="gold" onclick="show('voting')">🗳️ Votar</button>
+    <button class="ghost" onclick="showPublicResults()">📊 Resultados en vivo</button>
     <button class="ghost" onclick="show('adminLogin')">🔐 Administrador</button>
+  </div>
+ </div>
+</section>
+
+<!-- ============ RESULTADOS PÚBLICOS (para proyectar, sin necesitar admin) ============ -->
+<section id="publicResults" class="hidden">
+ <div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <h2 style="margin:0" id="resultsTitle">📊 Resultados en vivo</h2>
+    <button class="ghost" onclick="show('home')">⬅️ Volver</button>
+  </div>
+  <div class="grid" style="margin-top:16px">
+    <div><h3>👑 Rey</h3><div id="publicKingBars"></div></div>
+    <div><h3>👸 Reina</h3><div id="publicQueenBars"></div></div>
   </div>
  </div>
 </section>
@@ -190,7 +205,7 @@ hr{border:none;border-top:1px solid var(--line);margin:18px 0}
 <section id="adminLogin" class="hidden">
  <div class="card" style="max-width:450px;margin:auto">
   <h2>🔐 Acceso administrador</h2>
-  <p class="muted">Cambia la contraseña por defecto (<code>admin123</code>) antes de publicar, ver comentario en el código.</p>
+  <p class="muted">Ingresa la contraseña para gestionar la votación.</p>
   <label>Contraseña</label>
   <input id="adminPass" type="password" placeholder="••••••••">
   <div id="loginError" class="error"></div>
@@ -269,8 +284,17 @@ const firebaseConfig = {
   appId: "1:475951156202:web:d6323f811f3325630b0093"
 };
 
-// Contraseña de administrador (demo). Cámbiala antes de publicar.
-const ADMIN_PASSWORD = "admin123";
+// La contraseña de administrador YA NO vive en el código (para no revelarla a quien
+// inspeccione el archivo). Se guarda cifrada (hash SHA-256) en Firebase, en
+// config/adminPasswordHash, y se puede cambiar desde el panel (pestaña "⚙️ Elección").
+// La primera vez que la app corre, si no existe ninguna contraseña guardada, se
+// inicializa sola con "admin123" — cámbiala cuanto antes desde el panel.
+const DEFAULT_ADMIN_PASSWORD = "admin123";
+async function sha256Hex(str){
+  const enc = new TextEncoder().encode(str);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 
 /* ======================================================================
    2) INICIALIZACIÓN DE FIREBASE Y ESTADO LOCAL
@@ -284,7 +308,8 @@ let state = {
   kings: {},     // { id: {name, number, photo, votes} }
   queens: {},    // { id: {name, number, photo, votes} }
   voters: {},    // { codigoSanitizado: {kingId, queenId, ts} }
-  authCodes: {}  // { codigoSanitizado: true }  -> lista blanca de códigos autorizados a votar
+  authCodes: {}, // { codigoSanitizado: true }  -> lista blanca de códigos autorizados a votar
+  adminPasswordHash: null // hash SHA-256 de la contraseña de administrador (vive en Firebase)
 };
 
 let myVoterId = null;   // documento/código que la persona escribió en esta sesión
@@ -328,11 +353,26 @@ rtdb.ref('authCodes').on('value', snap => {
   refreshLiveViews();
 });
 
+rtdb.ref('config/adminPasswordHash').on('value', snap => {
+  const val = snap.val();
+  if (val === null){
+    // Primera vez que corre la app: no hay contraseña guardada todavía.
+    // La inicializamos con la contraseña por defecto, sin sobrescribir si alguien
+    // ya la puso justo antes (transacción atómica).
+    sha256Hex(DEFAULT_ADMIN_PASSWORD).then(h => {
+      rtdb.ref('config/adminPasswordHash').transaction(cur => cur===null ? h : cur);
+    });
+  } else {
+    state.adminPasswordHash = val;
+  }
+});
+
 function refreshLiveViews(){
   // Refresca cualquier vista que esté visible en este momento, sin recargar la página.
   // Importante: la pestaña "Candidatos" NO se reconstruye entera (updateCandidateLists
   // solo actualiza las listas), para no interrumpir una cámara abierta o una edición
   // en curso cada vez que entra un voto nuevo desde otro celular.
+  if (!document.getElementById('publicResults').classList.contains('hidden')) renderPublicResults();
   if (!document.getElementById('dash').classList.contains('hidden')) dash();
   if (!document.getElementById('candidates').classList.contains('hidden')) updateCandidateLists();
   if (!document.getElementById('codes').classList.contains('hidden')) codesPane();
@@ -361,6 +401,21 @@ function renderHome(){
   const st = document.getElementById('voteStatus');
   st.textContent = state.event.open ? 'La votación está abierta.' : 'La votación está cerrada.';
   st.classList.toggle('err', !state.event.open);
+}
+
+/* Vista pública de resultados en vivo: cualquiera puede verla, sin ser administrador.
+   Útil para proyectar en pantalla o que la gente la siga desde su celular. */
+function showPublicResults(){
+  show('publicResults');
+  renderPublicResults();
+}
+function renderPublicResults(){
+  const titleEl = document.getElementById('resultsTitle');
+  if (titleEl) titleEl.textContent = '📊 ' + state.event.title;
+  const kEl = document.getElementById('publicKingBars');
+  const qEl = document.getElementById('publicQueenBars');
+  if (kEl) kEl.innerHTML = bars(state.kings||{});
+  if (qEl) qEl.innerHTML = bars(state.queens||{});
 }
 
 /* ======================================================================
@@ -446,12 +501,20 @@ function confirmVote(){
 /* ======================================================================
    6) LOGIN Y NAVEGACIÓN DEL PANEL ADMIN
    ====================================================================== */
-function login(){
-  if (document.getElementById('adminPass').value === ADMIN_PASSWORD){
-    document.getElementById('loginError').textContent='';
+async function login(){
+  const errEl = document.getElementById('loginError');
+  if (!state.adminPasswordHash){
+    errEl.textContent = 'Cargando, espera un segundo e intenta de nuevo.';
+    return;
+  }
+  const entered = document.getElementById('adminPass').value;
+  const hash = await sha256Hex(entered);
+  if (hash === state.adminPasswordHash){
+    errEl.textContent='';
+    document.getElementById('adminPass').value='';
     show('admin'); renderAdmin('dash');
   } else {
-    document.getElementById('loginError').textContent='Contraseña incorrecta.';
+    errEl.textContent='Contraseña incorrecta.';
   }
 }
 function adminTab(id,btn){
@@ -858,21 +921,35 @@ function downloadCodesCSV(){
 function printCodes(){
   const codes = Object.keys(state.authCodes||{}).filter(c => !(state.voters&&state.voters[c])).sort();
   if (!codes.length){ alert('No hay códigos disponibles para imprimir (o ya se usaron todos).'); return; }
-  const voteUrl = location.href.split('#')[0] + '#voting';
+  // Cada ficha lleva un QR distinto: incluye el código en la URL (?code=XXXX), así que
+  // al escanearlo la persona entra directo a elegir Rey y Reina, sin escribir nada.
+  const base = location.origin + location.pathname;
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fichas de votación</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"><\/script>
   <style>
     body{font-family:sans-serif;margin:0;padding:10px}
-    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
     .ticket{border:1.5px dashed #999;border-radius:10px;padding:10px;text-align:center}
-    .ticket b{font-size:20px;letter-spacing:2px;display:block;margin:6px 0}
-    .ticket span{font-size:10px;color:#555;word-break:break-all}
-    @media print{ .grid{grid-template-columns:repeat(4,1fr)} }
+    .ticket b{font-size:16px;letter-spacing:2px;display:block;margin:6px 0}
+    .qrwrap{display:flex;justify-content:center;margin:4px 0}
+    .qrwrap img{width:100px;height:100px}
+    @media print{ .grid{grid-template-columns:repeat(4,1fr)} .ticket{break-inside:avoid} }
   </style></head><body>
   <div class="grid">
-    ${codes.map(c=>`<div class="ticket">👑 Rey &amp; Reina<b>${esc(c)}</b><span>${esc(voteUrl)}</span></div>`).join('')}
+    ${codes.map((c,i)=>`<div class="ticket">👑 Rey &amp; Reina<div class="qrwrap" id="qr${i}"></div><b>${esc(c)}</b></div>`).join('')}
   </div>
-  <script>window.print()<\/script>
+  <script>
+    var codes = ${JSON.stringify(codes)};
+    var base = ${JSON.stringify(base)};
+    codes.forEach(function(c,i){
+      new QRCode(document.getElementById('qr'+i), {
+        text: base + '?code=' + encodeURIComponent(c) + '#voting',
+        width: 100, height: 100
+      });
+    });
+    setTimeout(function(){ window.print(); }, 400);
+  <\/script>
   </body></html>`);
   win.document.close();
 }
@@ -894,6 +971,17 @@ function eventPane(){
         <button class="danger" onclick="resetVotes()">♻️ Reiniciar votos</button>
       </div>
       <p class="muted small">Al cerrar la elección, los votantes ya no podrán registrar votos desde ningún celular.</p>
+    </div>
+    <div class="card" style="margin-top:18px;max-width:450px">
+      <h2>🔑 Cambiar contraseña de administrador</h2>
+      <label>Contraseña actual</label>
+      <input id="curPass" type="password" placeholder="••••••••">
+      <label>Contraseña nueva</label>
+      <input id="newPass1" type="password" placeholder="Mínimo 4 caracteres">
+      <label>Repite la contraseña nueva</label>
+      <input id="newPass2" type="password" placeholder="••••••••">
+      <p id="passChangeMsg" class="error"></p>
+      <button class="gold" onclick="changeAdminPassword()">Cambiar contraseña</button>
     </div>`;
 }
 function saveEvent(){
@@ -910,6 +998,25 @@ function resetVotes(){
   Object.keys(state.queens||{}).forEach(id => updates['queens/'+id+'/votes'] = 0);
   rtdb.ref().update(updates);
   rtdb.ref('voters').remove();
+}
+async function changeAdminPassword(){
+  const cur = document.getElementById('curPass').value;
+  const n1 = document.getElementById('newPass1').value;
+  const n2 = document.getElementById('newPass2').value;
+  const msgEl = document.getElementById('passChangeMsg');
+  msgEl.style.color = '';
+  if (!n1 || n1.length < 4){ msgEl.style.color='#ff8f8f'; msgEl.textContent='La contraseña nueva debe tener al menos 4 caracteres.'; return; }
+  if (n1 !== n2){ msgEl.style.color='#ff8f8f'; msgEl.textContent='Las contraseñas nuevas no coinciden.'; return; }
+  const curHash = await sha256Hex(cur);
+  if (curHash !== state.adminPasswordHash){ msgEl.style.color='#ff8f8f'; msgEl.textContent='La contraseña actual no es correcta.'; return; }
+  const newHash = await sha256Hex(n1);
+  rtdb.ref('config/adminPasswordHash').set(newHash).then(()=>{
+    msgEl.style.color = '#7fe0a0';
+    msgEl.textContent = '✅ Contraseña actualizada correctamente.';
+    document.getElementById('curPass').value='';
+    document.getElementById('newPass1').value='';
+    document.getElementById('newPass2').value='';
+  }).catch(()=>{ msgEl.style.color='#ff8f8f'; msgEl.textContent='No se pudo guardar. Revisa tu conexión.'; });
 }
 
 /* ======================================================================
@@ -1029,7 +1136,18 @@ function esc(s){
    14) ARRANQUE
    ====================================================================== */
 renderHome();
-if (location.hash === '#voting') show('voting');
+const _codeFromUrl = new URLSearchParams(location.search).get('code');
+if (location.hash === '#voting' || _codeFromUrl){
+  show('voting');
+  if (_codeFromUrl){
+    // Viene de una ficha con QR personalizado: se salta el paso de escribir el código.
+    document.getElementById('voterId').value = _codeFromUrl;
+    startVoting();
+  }
+} else if (location.hash === '#resultados'){
+  showPublicResults();
+}
+
 </script>
 </body>
 </html>
