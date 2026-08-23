@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Rey & Reina | Sistema de Votación en Vivo</title>
+
+<!-- ============================================================
+     LIBRERÍAS EXTERNAS (CDN) — no requieren instalación ni build
+     ============================================================ -->
+<!-- Generador de código QR -->
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<!-- Confeti para el modo presentación / ganadores -->
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+<!-- Firebase (SDK compat: expone la API clásica firebase.xxx(), ideal para un solo archivo sin bundler) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+
+<style>
+:root{
+  --bg:#0d0f14; --bg2:#12151d;
+  --card:#171a23; --card2:#1d212c;
+  --ink:#f4f1e8; --muted:#9aa3b5;
+  --gold:#d4af37; --gold2:#f3d878; --gold-deep:#a9821f;
+  --line:#2a2f3d;
+  --ok:#2f9e5c; --danger:#e05959;
+  --radius:16px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,Inter,sans-serif;background:
+     radial-gradient(circle at 15% 0%,#1b1f2b 0%,var(--bg) 55%);
+     color:var(--ink);min-height:100vh}
+header{background:linear-gradient(135deg,#0a0c11,#1c2030 60%,#20180a);
+       color:#fff;padding:20px 18px;position:sticky;top:0;z-index:30;
+       border-bottom:1px solid #2c2718;box-shadow:0 4px 18px #0008}
+.header-in{max-width:1150px;margin:auto;display:flex;justify-content:space-between;gap:15px;align-items:center;flex-wrap:wrap}
+.brand{font-size:21px;font-weight:800;letter-spacing:.3px}
+.brand span{background:linear-gradient(120deg,var(--gold),var(--gold2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.badge-live{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);border:1px solid var(--line);padding:5px 10px;border-radius:20px}
+.dot{width:8px;height:8px;border-radius:50%;background:#555}
+.dot.on{background:#3fd67a;box-shadow:0 0 8px #3fd67a99;animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+.container{max-width:1150px;margin:26px auto;padding:0 16px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);
+      border-radius:var(--radius);padding:22px;box-shadow:0 10px 30px #00000040}
+h1,h2,h3{margin-top:0;font-weight:800}
+.muted{color:var(--muted)}
+button,.btn{border:0;border-radius:11px;padding:12px 16px;font-weight:700;cursor:pointer;
+            background:#232838;color:#fff;transition:.15s;font-size:14.5px}
+button:hover{filter:brightness(1.15)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.gold{background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#1a1200;box-shadow:0 6px 18px #d4af3733}
+.danger{background:linear-gradient(135deg,var(--danger),#a83c3c)}
+.ok{background:linear-gradient(135deg,var(--ok),#1f6e40)}
+.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+input,select{width:100%;padding:12px;border:1px solid #333a4b;border-radius:10px;margin:6px 0 12px;
+             background:#0f1218;color:var(--ink);font-size:15px}
+input:focus,select:focus{outline:2px solid var(--gold);outline-offset:1px}
+label{font-size:12.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.tabs button{background:#181c26;color:#aeb4c2;border:1px solid var(--line)}
+.tabs button.active{background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#1a1200;border-color:transparent}
+
+.hidden{display:none!important}
+.hero{text-align:center;padding:40px 15px}
+.crown{font-size:56px;filter:drop-shadow(0 6px 12px #00000060)}
+.candidate-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:15px}
+.candidate{border:2px solid var(--line);border-radius:16px;padding:12px;text-align:center;cursor:pointer;
+           transition:.15s;background:#141822}
+.candidate:hover{border-color:#454b60;transform:translateY(-2px)}
+.candidate.selected{border-color:var(--gold);box-shadow:0 0 0 3px #d4af3733,0 10px 24px #d4af3722;transform:translateY(-2px)}
+.avatar{height:150px;border-radius:12px;background:#0f1218;display:flex;align-items:center;justify-content:center;
+        font-size:52px;overflow:hidden;margin-bottom:10px;border:1px solid var(--line)}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.num{display:inline-block;background:#2a2410;color:var(--gold2);border:1px solid #4a3e14;border-radius:20px;
+     padding:4px 10px;font-size:12px;font-weight:800}
+.vote-step{margin-bottom:24px}
+.actions{display:flex;gap:10px;flex-wrap:wrap}
+.statgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stat{padding:16px;border:1px solid var(--line);border-radius:14px;background:#12151f}
+.stat b{font-size:26px;display:block}
+.barrow{margin:14px 0}
+.barhead{display:flex;justify-content:space-between;font-size:14px;font-weight:700}
+.bar{height:16px;background:#0f1218;border-radius:20px;overflow:hidden;margin-top:6px;border:1px solid var(--line)}
+.fill{height:100%;background:linear-gradient(90deg,var(--gold-deep),var(--gold),var(--gold2));border-radius:20px;
+      transition:width .5s ease}
+.winner{border:2px solid var(--gold);background:linear-gradient(135deg,#1c1808,#171a23);padding:24px;
+        border-radius:18px;text-align:center}
+.winner .big{font-size:28px;font-weight:900;color:var(--gold2)}
+.small{font-size:12px}
+.row{display:flex;gap:10px;align-items:center}
+.row>*{flex:1}
+.qrbox{display:flex;justify-content:center;margin:14px;background:#fff;padding:14px;border-radius:14px;width:fit-content;margin-inline:auto}
+.notice{padding:13px;border-radius:12px;background:#221c0a;border:1px solid #4a3e14;color:#e8d18f}
+.notice.err{background:#2a1414;border-color:#5c2323;color:#f3b3b3}
+.error{color:#ff8f8f;font-size:13px;min-height:18px}
+footer{text-align:center;color:var(--muted);padding:34px 15px;font-size:13px}
+.pill{display:inline-block;font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+hr{border:none;border-top:1px solid var(--line);margin:18px 0}
+
+/* --- Módulo de cámara --- */
+.cam-box{background:#0a0c11;border:1px dashed var(--line);border-radius:14px;padding:14px;margin:10px 0 16px}
+.cam-video-wrap{position:relative;width:100%;max-width:320px;margin:0 auto;border-radius:12px;overflow:hidden;
+                 background:#000;aspect-ratio:1/1}
+.cam-video-wrap video{width:100%;height:100%;object-fit:cover;display:block}
+.cam-controls{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
+.cam-preview{display:flex;align-items:center;gap:12px;margin-top:12px}
+.cam-preview img{width:78px;height:78px;object-fit:cover;border-radius:10px;border:2px solid var(--gold)}
+
+/* --- Modo presentación --- */
+#presentation{position:fixed;inset:0;background:radial-gradient(circle at 50% 0%,#1b1706 0%,#08090c 65%);
+              z-index:100;color:#fff;overflow:auto}
+.pres-inner{max-width:1100px;margin:0 auto;padding:50px 24px;text-align:center}
+.pres-title{font-size:clamp(28px,5vw,46px);font-weight:900;color:var(--gold2);margin-bottom:6px}
+.pres-sub{color:#c9cedb;margin-bottom:36px}
+.pres-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.pres-card{background:#12141c;border:1px solid #2a2f3d;border-radius:20px;padding:30px 20px}
+.pres-crown{font-size:60px}
+.pres-avatar{width:150px;height:150px;border-radius:50%;object-fit:cover;border:4px solid var(--gold);
+             margin:14px auto;display:block;box-shadow:0 0 40px #d4af3755}
+.pres-name{font-size:26px;font-weight:900;margin-top:8px}
+.pres-votes{color:var(--gold2);font-weight:700;margin-top:4px}
+.pres-close{position:fixed;top:18px;right:18px;z-index:101}
+
+@media(max-width:720px){
+ .grid,.statgrid,.pres-grid{grid-template-columns:1fr}
+ .header-in{align-items:flex-start}
+ .container{margin-top:16px}
+ .avatar{height:130px}
+}
+</style>
+</head>
+<body>
+<header>
+ <div class="header-in">
+   <div class="brand">👑 Rey <span>&</span> Reina</div>
+   <div class="badge-live"><span id="connDot" class="dot"></span><span id="connLabel">Conectando…</span></div>
+ </div>
+</header>
+
+<main class="container">
+
+<!-- ============ PANTALLA DE INICIO ============ -->
+<section id="home">
+ <div class="hero card">
+  <div class="crown">👑</div>
+  <h1 id="eventTitle">Elección de Rey y Reina</h1>
+  <p class="muted">Selecciona un candidato para Rey y una candidata para Reina.</p>
+  <div id="voteStatus" class="notice">Cargando estado de la votación…</div>
+  <div style="margin-top:18px">
+    <button class="gold" onclick="show('voting')">🗳️ Votar</button>
+    <button class="ghost" onclick="show('adminLogin')">🔐 Administrador</button>
+  </div>
+ </div>
+</section>
+
+<!-- ============ FLUJO DE VOTACIÓN ============ -->
+<section id="voting" class="hidden">
+ <div class="card">
+  <div class="tabs">
+    <button class="active">1. Identificación</button><button>2. Rey y Reina</button><button>3. Confirmar</button>
+  </div>
+
+  <div id="idStep" class="vote-step">
+    <h2>🪪 Identifícate para votar</h2>
+    <p class="muted">Ingresa tu documento o código de acceso. Cada identificación solo puede votar una vez.</p>
+    <label>Documento / Código de acceso</label>
+    <input id="voterId" placeholder="Ej: 1029384756" autocomplete="off">
+    <div id="idError" class="error"></div>
+    <button class="gold" onclick="startVoting()">Continuar</button>
+  </div>
+
+  <div id="candStep" class="vote-step hidden">
+    <div class="vote-step"><h2>👑 Elige al Rey</h2><div id="kings" class="candidate-grid"></div></div>
+    <div class="vote-step"><h2>👸 Elige a la Reina</h2><div id="queens" class="candidate-grid"></div></div>
+    <div id="voteError" class="error"></div>
+    <div class="actions">
+      <button class="ghost" onclick="show('home')">Cancelar</button>
+      <button class="gold" onclick="confirmVote()" id="confirmVoteBtn">Confirmar mi voto</button>
+    </div>
+  </div>
+ </div>
+</section>
+
+<!-- ============ LOGIN ADMIN ============ -->
+<section id="adminLogin" class="hidden">
+ <div class="card" style="max-width:450px;margin:auto">
+  <h2>🔐 Acceso administrador</h2>
+  <p class="muted">Cambia la contraseña por defecto (<code>admin123</code>) antes de publicar, ver comentario en el código.</p>
+  <label>Contraseña</label>
+  <input id="adminPass" type="password" placeholder="••••••••">
+  <div id="loginError" class="error"></div>
+  <button class="gold" onclick="login()">Entrar</button>
+  <button class="ghost" onclick="show('home')" style="margin-top:8px">Volver</button>
+ </div>
+</section>
+
+<!-- ============ PANEL DE ADMINISTRACIÓN ============ -->
+<section id="admin" class="hidden">
+ <div class="tabs">
+  <button class="active" onclick="adminTab('dash',this)">📊 Resultados</button>
+  <button onclick="adminTab('candidates',this)">👑 Candidatos</button>
+  <button onclick="adminTab('event',this)">⚙️ Elección</button>
+  <button onclick="adminTab('qr',this)">📱 QR</button>
+  <button onclick="adminTab('data',this)">🗂️ Datos</button>
+  <button class="ghost" onclick="openPresentation()">🎬 Modo presentación</button>
+ </div>
+ <div id="dash" class="adminpane"></div>
+ <div id="candidates" class="adminpane hidden"></div>
+ <div id="event" class="adminpane hidden"></div>
+ <div id="qr" class="adminpane hidden"></div>
+ <div id="data" class="adminpane hidden"></div>
+</section>
+
+</main>
+
+<!-- ============ MODO PRESENTACIÓN / GANADORES ============ -->
+<div id="presentation" class="hidden">
+ <button class="danger pres-close" onclick="closePresentation()">✕ Cerrar</button>
+ <div class="pres-inner">
+   <div class="pres-title" id="presTitle">Elección de Rey y Reina</div>
+   <div class="pres-sub">Resultado final</div>
+   <div class="pres-grid">
+     <div class="pres-card">
+       <div class="pres-crown">👑</div>
+       <img id="presKingImg" class="pres-avatar hidden">
+       <div class="pres-name" id="presKingName">—</div>
+       <div class="pres-votes" id="presKingVotes"></div>
+     </div>
+     <div class="pres-card">
+       <div class="pres-crown">👸</div>
+       <img id="presQueenImg" class="pres-avatar hidden">
+       <div class="pres-name" id="presQueenName">—</div>
+       <div class="pres-votes" id="presQueenVotes"></div>
+     </div>
+   </div>
+   <div style="margin-top:32px">
+     <button class="gold" onclick="fireConfetti()">🎉 Lanzar confeti</button>
+     <button class="ghost" onclick="requestPresFullscreen()">⛶ Pantalla completa</button>
+   </div>
+ </div>
+</div>
+
+<footer>Rey &amp; Reina · Web App en tiempo real · Los datos se sincronizan mediante Firebase Realtime Database.</footer>
+
+<script>
+/* ======================================================================
+   1) CONFIGURACIÓN DE FIREBASE
+   ----------------------------------------------------------------------
+   Pega aquí tus propias credenciales del proyecto (Firebase Console →
+   Configuración del proyecto → General → "Tus apps" → SDK config).
+   Recuerda además crear una Realtime Database y ajustar las reglas de
+   seguridad (por defecto, en modo prueba, cualquiera puede leer/escribir;
+   para producción real restringe según tus necesidades).
+   ====================================================================== */
+const firebaseConfig = {
+  apiKey: "TU_API_KEY",
+  authDomain: "TU_PROYECTO.firebaseapp.com",
+  databaseURL: "https://TU_PROYECTO-default-rtdb.firebaseio.com",
+  projectId: "TU_PROYECTO",
+  storageBucket: "TU_PROYECTO.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "TU_APP_ID"
+};
+
+// Contraseña de administrador (demo). Cámbiala antes de publicar.
+const ADMIN_PASSWORD = "admin123";
+
+/* ======================================================================
+   2) INICIALIZACIÓN DE FIREBASE Y ESTADO LOCAL
+   ====================================================================== */
+firebase.initializeApp(firebaseConfig);
+const rtdb = firebase.database();
+
+// Espejo local de lo que hay en Firebase (se actualiza vía listeners onValue)
+let state = {
+  event: { title: 'Elección de Rey y Reina', open: true },
+  kings: {},   // { id: {name, number, photo, votes} }
+  queens: {},  // { id: {name, number, photo, votes} }
+  voters: {}   // { idSanitizado: {kingId, queenId, ts} }
+};
+
+let myVoterId = null;   // documento/código que la persona escribió en esta sesión
+let selK = null, selQ = null; // selección de candidato/a antes de confirmar
+
+/* Marca visual de conexión con Firebase */
+rtdb.ref('.info/connected').on('value', snap => {
+  const on = snap.val() === true;
+  document.getElementById('connDot').classList.toggle('on', on);
+  document.getElementById('connLabel').textContent = on ? 'En vivo' : 'Sin conexión';
+});
+
+/* ======================================================================
+   3) LISTENERS EN TIEMPO REAL
+   Cada vez que cambia algo en Firebase (desde cualquier celular o el
+   panel admin), estas funciones se disparan solas y refrescan la UI.
+   ====================================================================== */
+rtdb.ref('event').on('value', snap => {
+  state.event = snap.val() || state.event;
+  renderHome();
+  if (!document.getElementById('event').classList.contains('hidden')) eventPane();
+});
+
+rtdb.ref('kings').on('value', snap => {
+  state.kings = snap.val() || {};
+  refreshLiveViews();
+});
+
+rtdb.ref('queens').on('value', snap => {
+  state.queens = snap.val() || {};
+  refreshLiveViews();
+});
+
+rtdb.ref('voters').on('value', snap => {
+  state.voters = snap.val() || {};
+  refreshLiveViews();
+});
+
+function refreshLiveViews(){
+  // Refresca cualquier vista que esté visible en este momento, sin recargar la página.
+  // Importante: la pestaña "Candidatos" NO se reconstruye entera (updateCandidateLists
+  // solo actualiza las listas), para no interrumpir una cámara abierta o una edición
+  // en curso cada vez que entra un voto nuevo desde otro celular.
+  if (!document.getElementById('dash').classList.contains('hidden')) dash();
+  if (!document.getElementById('candidates').classList.contains('hidden')) updateCandidateLists();
+  if (!document.getElementById('data').classList.contains('hidden')) dataPane();
+  if (!document.getElementById('voting').classList.contains('hidden') &&
+      !document.getElementById('candStep').classList.contains('hidden')) renderVoting();
+}
+
+/* ======================================================================
+   4) NAVEGACIÓN ENTRE PANTALLAS
+   ====================================================================== */
+function show(id){
+  document.querySelectorAll('main section').forEach(x=>x.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  if (id==='voting'){
+    document.getElementById('idStep').classList.remove('hidden');
+    document.getElementById('candStep').classList.add('hidden');
+    document.getElementById('voterId').value='';
+    document.getElementById('idError').textContent='';
+  }
+  if (id==='home') renderHome();
+}
+
+function renderHome(){
+  document.getElementById('eventTitle').textContent = state.event.title;
+  const st = document.getElementById('voteStatus');
+  st.textContent = state.event.open ? 'La votación está abierta.' : 'La votación está cerrada.';
+  st.classList.toggle('err', !state.event.open);
+}
+
+/* ======================================================================
+   5) VALIDACIÓN DE VOTANTE + FLUJO DE VOTO
+   ====================================================================== */
+function sanitizeId(raw){
+  // Firebase RTDB no permite . # $ [ ] / en las llaves
+  return String(raw).trim().replace(/[.#$\[\]\/\s]+/g,'_').toUpperCase();
+}
+
+function startVoting(){
+  const raw = document.getElementById('voterId').value.trim();
+  const errEl = document.getElementById('idError');
+  if (!state.event.open){ errEl.textContent='La votación está cerrada en este momento.'; return; }
+  if (!raw){ errEl.textContent='Ingresa tu documento o código de acceso.'; return; }
+  const id = sanitizeId(raw);
+  if (state.voters[id]){
+    errEl.textContent = 'Este documento/código ya registró un voto anteriormente.';
+    return;
+  }
+  errEl.textContent='';
+  myVoterId = id;
+  selK = selQ = null;
+  document.getElementById('idStep').classList.add('hidden');
+  document.getElementById('candStep').classList.remove('hidden');
+  renderVoting();
+}
+
+function avatarHTML(c){
+  return c.photo
+    ? `<div class="avatar"><img src="${c.photo}" alt=""></div>`
+    : `<div class="avatar">👤</div>`;
+}
+function candidateCard(id,c,type){
+  const isSel = (type==='k' && selK===id) || (type==='q' && selQ===id);
+  return `<div class="candidate ${isSel?'selected':''}" onclick="selectCand('${type}','${id}')">
+            ${avatarHTML(c)}<span class="num">N.º ${esc(c.number)}</span><h3>${esc(c.name)}</h3></div>`;
+}
+function selectCand(type,id){
+  type==='k' ? (selK=id) : (selQ=id);
+  renderVoting();
+}
+function renderVoting(){
+  const kEntries = Object.entries(state.kings||{});
+  const qEntries = Object.entries(state.queens||{});
+  document.getElementById('kings').innerHTML = kEntries.map(([id,c])=>candidateCard(id,c,'k')).join('') || '<p class="muted">No hay candidatos registrados.</p>';
+  document.getElementById('queens').innerHTML = qEntries.map(([id,c])=>candidateCard(id,c,'q')).join('') || '<p class="muted">No hay candidatas registradas.</p>';
+}
+
+function confirmVote(){
+  const errEl = document.getElementById('voteError');
+  errEl.textContent='';
+  if (!state.event.open){ errEl.textContent='La votación está cerrada.'; return; }
+  if (!myVoterId){ errEl.textContent='Debes identificarte primero.'; show('voting'); return; }
+  if (!selK || !selQ){ errEl.textContent='Debes seleccionar Rey y Reina.'; return; }
+
+  const btn = document.getElementById('confirmVoteBtn');
+  btn.disabled = true; btn.textContent='Registrando…';
+
+  // Transacción atómica: solo se crea el registro del votante si NO existía ya.
+  // Esto evita votos duplicados aunque dos pestañas/celulares intenten a la vez.
+  rtdb.ref('voters/'+myVoterId).transaction(current => {
+    if (current !== null) return; // ya existe -> abortar (undefined aborta la transacción)
+    return { kingId: selK, queenId: selQ, ts: firebase.database.ServerValue.TIMESTAMP };
+  }, (error, committed) => {
+    btn.disabled = false; btn.textContent='Confirmar mi voto';
+    if (error){ errEl.textContent='Ocurrió un error de conexión. Intenta nuevamente.'; return; }
+    if (!committed){ errEl.textContent='Este documento/código ya había votado.'; return; }
+    // Solo si el voto del votante se registró con éxito, sumamos los conteos.
+    rtdb.ref('kings/'+selK+'/votes').transaction(v => (v||0)+1);
+    rtdb.ref('queens/'+selQ+'/votes').transaction(v => (v||0)+1);
+    alert('✅ Voto registrado correctamente. ¡Gracias por participar!');
+    selK = selQ = null; myVoterId = null;
+    show('home');
+  });
+}
+
+/* ======================================================================
+   6) LOGIN Y NAVEGACIÓN DEL PANEL ADMIN
+   ====================================================================== */
+function login(){
+  if (document.getElementById('adminPass').value === ADMIN_PASSWORD){
+    document.getElementById('loginError').textContent='';
+    show('admin'); renderAdmin('dash');
+  } else {
+    document.getElementById('loginError').textContent='Contraseña incorrecta.';
+  }
+}
+function adminTab(id,btn){
+  stopAllCamStreams(); // evita dejar la cámara encendida al salir de la pestaña
+  document.querySelectorAll('.adminpane').forEach(x=>x.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+  document.querySelectorAll('#admin .tabs button').forEach(x=>x.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderAdmin(id);
+}
+function renderAdmin(id){
+  if (id==='dash') dash();
+  if (id==='candidates') candidates();
+  if (id==='event') eventPane();
+  if (id==='qr') qrPane();
+  if (id==='data') dataPane();
+}
+
+/* ======================================================================
+   7) DASHBOARD DE RESULTADOS EN VIVO
+   ====================================================================== */
+function bars(list){
+  const arr = Object.values(list);
+  const max = Math.max(...arr.map(x=>x.votes||0), 1);
+  return arr.slice().sort((a,b)=>(b.votes||0)-(a.votes||0)).map(x=>`
+    <div class="barrow">
+      <div class="barhead"><span>${esc(x.name)}</span><span>${x.votes||0} votos</span></div>
+      <div class="bar"><div class="fill" style="width:${(x.votes||0)/max*100}%"></div></div>
+    </div>`).join('') || '<p class="muted">Sin candidatos.</p>';
+}
+function topOf(list){
+  const arr = Object.entries(list);
+  if (!arr.length) return null;
+  return arr.slice().sort((a,b)=>(b[1].votes||0)-(a[1].votes||0))[0];
+}
+function dash(){
+  const totalVotos = Object.keys(state.voters||{}).length;
+  const topK = topOf(state.kings||{}), topQ = topOf(state.queens||{});
+  document.getElementById('dash').innerHTML = `
+    <div class="card" style="margin-bottom:18px">
+      <h2 style="margin-bottom:4px">🔴 Votación en vivo</h2>
+      <span class="muted">Las barras se actualizan automáticamente en cuanto llega un voto desde cualquier celular.</span>
+    </div>
+    <div class="grid">
+      <div class="card"><h2>👑 Resultados Rey</h2>${bars(state.kings||{})}</div>
+      <div class="card"><h2>👸 Resultados Reina</h2>${bars(state.queens||{})}</div>
+    </div>
+    <div class="card" style="margin-top:18px">
+      <div class="statgrid">
+        <div class="stat"><span class="muted">Votos registrados</span><b>${totalVotos}</b></div>
+        <div class="stat"><span class="muted">Estado</span><b style="font-size:18px">${state.event.open?'🟢 ABIERTA':'🔒 CERRADA'}</b></div>
+        <div class="stat"><span class="muted">Candidatos</span><b>${Object.keys(state.kings||{}).length + Object.keys(state.queens||{}).length}</b></div>
+      </div>
+    </div>
+    <div class="grid" style="margin-top:18px">
+      <div class="winner"><div>👑 REY VA GANANDO</div><div class="big">${topK?esc(topK[1].name):'Sin votos'}</div><p>${topK?(topK[1].votes||0):0} votos</p></div>
+      <div class="winner"><div>👸 REINA VA GANANDO</div><div class="big">${topQ?esc(topQ[1].name):'Sin votos'}</div><p>${topQ?(topQ[1].votes||0):0} votos</p></div>
+    </div>`;
+}
+
+/* ======================================================================
+   8) GESTIÓN DE CANDIDATOS + MÓDULO DE CÁMARA
+   ====================================================================== */
+function candidates(){
+  document.getElementById('candidates').innerHTML = `
+    <div class="grid">
+      <div class="card">
+        <h2>👑 Reyes</h2><div id="kingsList">${listCandidates('kings')}</div><hr>
+        <h3>Agregar Rey</h3>${candidateForm('k')}
+      </div>
+      <div class="card">
+        <h2>👸 Reinas</h2><div id="queensList">${listCandidates('queens')}</div><hr>
+        <h3>Agregar Reina</h3>${candidateForm('q')}
+      </div>
+    </div>`;
+}
+// Refresco quirúrgico: solo reemplaza el contenido de las listas (no el formulario
+// de "Agregar", que puede tener una cámara abierta). Se llama en cada voto en vivo.
+function updateCandidateLists(){
+  if (openEdits.size) return; // no pisar una edición en curso por un voto entrante
+  const kl = document.getElementById('kingsList'); if (kl) kl.innerHTML = listCandidates('kings');
+  const ql = document.getElementById('queensList'); if (ql) ql.innerHTML = listCandidates('queens');
+}
+let openEdits = new Set(); // ids "kings/xxxx" con el formulario de edición abierto
+
+function listCandidates(key){
+  const arr = Object.entries(state[key]||{});
+  if (!arr.length) return '<p class="muted">No hay candidatos.</p>';
+  return arr.map(([id,c])=>{
+    if (openEdits.has(key+'/'+id)) return editCandidateForm(key,id,c);
+    return `
+    <div class="row" style="margin-bottom:9px">
+      <div class="avatar" style="height:46px;width:46px;flex:none;font-size:20px">${c.photo?`<img src="${c.photo}">`:'👤'}</div>
+      <b>${esc(c.number)}</b><span>${esc(c.name)}</span>
+      <button class="ghost" onclick="toggleEdit('${key}','${id}')">✏️ Editar</button>
+      <button class="danger" onclick="delCandidate('${key}','${id}')">Eliminar</button>
+    </div>`;
+  }).join('');
+}
+function toggleEdit(key,id){
+  const editKey = key+'/'+id;
+  openEdits.has(editKey) ? openEdits.delete(editKey) : openEdits.add(editKey);
+  const kl = document.getElementById('kingsList'); if (kl) kl.innerHTML = listCandidates('kings');
+  const ql = document.getElementById('queensList'); if (ql) ql.innerHTML = listCandidates('queens');
+}
+function editCandidateForm(key,id,c){
+  // camKey único por candidato, para que su módulo de cámara no choque con otros
+  const camKey = 'ed_'+key+'_'+String(id).replace(/[^A-Za-z0-9_-]/g,'');
+  return `
+   <div class="cam-box" style="margin:8px 0">
+     <label>Nombre</label>
+     <input id="${camKey}_name" value="${esc(c.name)}">
+     <label>Número</label>
+     <input id="${camKey}_num" value="${esc(c.number)}">
+     ${cameraModuleHTML(camKey)}
+     <div class="actions">
+       <button class="gold" onclick="saveCandidateEdit('${key}','${id}','${camKey}')">💾 Guardar cambios</button>
+       <button class="ghost" onclick="toggleEdit('${key}','${id}')">Cancelar</button>
+     </div>
+   </div>`;
+}
+function saveCandidateEdit(key,id,camKey){
+  const name = document.getElementById(camKey+'_name').value.trim();
+  const number = document.getElementById(camKey+'_num').value.trim();
+  if (!name){ alert('El nombre no puede estar vacío.'); return; }
+  const updates = { name, number };
+  if (camPhotos[camKey]) updates.photo = camPhotos[camKey]; // solo si tomó una foto nueva
+  rtdb.ref(key+'/'+id).update(updates).then(()=>{
+    camPhotos[camKey] = null;
+    stopAllCamStreams();
+    openEdits.delete(key+'/'+id);
+    updateCandidateLists();
+  }).catch(()=>alert('No se pudo guardar el cambio. Revisa tu conexión e intenta de nuevo.'));
+}
+function candidateForm(t){
+  return `
+   <label>Nombre</label>
+   <input id="${t}name" placeholder="${t==='k'?'Nombre del Rey':'Nombre de la Reina'}">
+   <label>Número</label>
+   <input id="${t}num" placeholder="01">
+   ${cameraModuleHTML(t)}
+   <button class="gold" id="${t}addBtn" onclick="addCandidate('${t}')">➕ Agregar candidato</button>`;
+}
+
+/* --- Módulo de captura de foto (webcam / cámara del celular) ---
+   Robustez: valida contexto seguro (HTTPS) y soporte del navegador, espera a que
+   el video tenga dimensiones antes de habilitar "Capturar", da mensajes de error
+   claros según el tipo de fallo, y ofrece como respaldo un <input type="file"
+   capture="environment"> que abre la app de cámara nativa del celular (funciona
+   incluso si getUserMedia falla o el navegador no lo soporta). Toda foto —venga
+   de la cámara en vivo o del respaldo— pasa por el mismo canvas 350x350 y se
+   comprime a WebP (o JPEG si el navegador no soporta WebP) calidad 0.7. */
+function cameraModuleHTML(t){
+  return `
+   <div class="cam-box">
+     <label>Foto del candidato (opcional)</label>
+     <p class="small muted" id="${t}camStatus" style="min-height:16px"></p>
+     <div class="cam-video-wrap hidden" id="${t}camWrap">
+       <video id="${t}video" autoplay playsinline muted></video>
+     </div>
+     <div class="cam-controls">
+       <button type="button" class="ghost" onclick="camStart('${t}','environment')">📷 Cámara trasera</button>
+       <button type="button" class="ghost" onclick="camStart('${t}','user')">🤳 Cámara frontal</button>
+       <button type="button" class="gold hidden" id="${t}capBtn" onclick="camCapture('${t}')" disabled>📸 Capturar foto</button>
+       <button type="button" class="danger hidden" id="${t}stopBtn" onclick="camStop('${t}')">Cerrar cámara</button>
+       <label class="btn ghost" style="display:inline-flex;align-items:center;margin:0">
+         🖼️ Tomar/subir foto
+         <input type="file" accept="image/*" capture="environment" id="${t}fileInput"
+                style="position:absolute;width:1px;height:1px;opacity:0" onchange="camFromFile('${t}',this)">
+       </label>
+     </div>
+     <div class="cam-preview hidden" id="${t}preview">
+       <img id="${t}previewImg">
+       <div><span class="muted small" id="${t}previewMeta">Foto capturada</span><br>
+         <button type="button" class="ghost" onclick="camRetake('${t}')">🔄 Repetir foto</button>
+       </div>
+     </div>
+     <canvas id="${t}canvas" width="350" height="350" class="hidden"></canvas>
+   </div>`;
+}
+// Guarda el stream activo y la última foto tomada, por clave de módulo de cámara
+const camStreams = {};
+const camPhotos  = {};
+
+async function camStart(t, facing){
+  camStop(t); // cierra cualquier stream anterior de este módulo
+  const statusEl = document.getElementById(t+'camStatus');
+  if (!window.isSecureContext){
+    if (statusEl) statusEl.textContent = '⚠️ La cámara en vivo solo funciona en HTTPS. Usa "Tomar/subir foto".';
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    if (statusEl) statusEl.textContent = '⚠️ Este navegador no soporta cámara en vivo. Usa "Tomar/subir foto".';
+    return;
+  }
+  if (statusEl) statusEl.textContent = 'Solicitando acceso a la cámara…';
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: facing } }, audio: false
+    });
+    camStreams[t] = stream;
+    const video = document.getElementById(t+'video');
+    video.srcObject = stream;
+    document.getElementById(t+'camWrap').classList.remove('hidden');
+    document.getElementById(t+'stopBtn').classList.remove('hidden');
+    const capBtn = document.getElementById(t+'capBtn');
+    capBtn.classList.remove('hidden');
+    capBtn.disabled = true; // se habilita cuando el video ya tiene tamaño real
+    video.onloadedmetadata = () => {
+      capBtn.disabled = false;
+      if (statusEl) statusEl.textContent = 'Cámara lista. Encuadra y presiona "Capturar foto".';
+    };
+  }catch(err){
+    let msg = 'No se pudo abrir la cámara.';
+    if (err.name === 'NotAllowedError') msg = 'Permiso de cámara denegado. Actívalo en la configuración del navegador.';
+    else if (err.name === 'NotFoundError') msg = 'No se encontró ninguna cámara en este dispositivo.';
+    else if (err.name === 'NotReadableError') msg = 'La cámara ya está siendo usada por otra aplicación.';
+    else if (err.name === 'OverconstrainedError') msg = 'No se pudo usar esa cámara; prueba con la otra opción.';
+    if (statusEl) statusEl.textContent = '⚠️ '+msg;
+    else alert(msg);
+  }
+}
+function camCapture(t){
+  const video = document.getElementById(t+'video');
+  if (!video.videoWidth || !video.videoHeight){
+    alert('La cámara aún no está lista, espera un instante e intenta de nuevo.');
+    return;
+  }
+  const canvas = document.getElementById(t+'canvas');
+  const ctx = canvas.getContext('2d');
+  // Recorta al centro un cuadrado del video y lo escala a 350x350
+  const side = Math.min(video.videoWidth, video.videoHeight);
+  const sx = (video.videoWidth - side)/2, sy = (video.videoHeight - side)/2;
+  ctx.drawImage(video, sx, sy, side, side, 0, 0, 350, 350);
+  applyCapturedPhoto(t, canvas);
+  camStop(t);
+}
+// Respaldo: procesa una foto tomada con la app nativa de cámara del celular o
+// elegida de la galería, aplicando el mismo recorte/compresión que la cámara en vivo.
+function camFromFile(t, inputEl){
+  const file = inputEl.files && inputEl.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById(t+'camStatus');
+  if (statusEl) statusEl.textContent = 'Procesando foto…';
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById(t+'canvas');
+      const ctx = canvas.getContext('2d');
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      const sx = (img.naturalWidth - side)/2, sy = (img.naturalHeight - side)/2;
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, 350, 350);
+      applyCapturedPhoto(t, canvas);
+      if (statusEl) statusEl.textContent = '';
+      inputEl.value = '';
+    };
+    img.onerror = () => { if (statusEl) statusEl.textContent = '⚠️ No se pudo leer la imagen seleccionada.'; };
+    img.src = e.target.result;
+  };
+  reader.onerror = () => { if (statusEl) statusEl.textContent = '⚠️ No se pudo leer el archivo.'; };
+  reader.readAsDataURL(file);
+}
+// Comprime a WebP (más liviano); si el navegador no lo soporta, cae a JPEG 0.7
+function compressCanvasToDataURL(canvas){
+  let dataUrl = canvas.toDataURL('image/webp', 0.7);
+  if (!dataUrl.startsWith('data:image/webp')) dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+  return dataUrl;
+}
+function applyCapturedPhoto(t, canvas){
+  const dataUrl = compressCanvasToDataURL(canvas);
+  camPhotos[t] = dataUrl;
+  document.getElementById(t+'previewImg').src = dataUrl;
+  const kb = Math.round(dataUrl.length * 0.75 / 1024); // tamaño aproximado del Base64
+  const meta = document.getElementById(t+'previewMeta');
+  if (meta) meta.textContent = `Foto capturada (~${kb} KB)`;
+  document.getElementById(t+'preview').classList.remove('hidden');
+}
+function camRetake(t){
+  camPhotos[t] = null;
+  document.getElementById(t+'preview').classList.add('hidden');
+}
+function camStop(t){
+  if (camStreams[t]){
+    camStreams[t].getTracks().forEach(tr=>tr.stop());
+    camStreams[t] = null;
+  }
+  const wrap = document.getElementById(t+'camWrap');
+  if (wrap) wrap.classList.add('hidden');
+  const capBtn = document.getElementById(t+'capBtn');
+  if (capBtn) capBtn.classList.add('hidden');
+  const stopBtn = document.getElementById(t+'stopBtn');
+  if (stopBtn) stopBtn.classList.add('hidden');
+}
+function stopAllCamStreams(){
+  Object.keys(camStreams).forEach(t => { if (camStreams[t]) camStop(t); });
+}
+window.addEventListener('beforeunload', stopAllCamStreams);
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopAllCamStreams(); });
+
+function addCandidate(t){
+  const n = document.getElementById(t+'name').value.trim();
+  const num = document.getElementById(t+'num').value.trim() || String(Date.now()).slice(-2);
+  if (!n){ alert('Escribe el nombre del candidato.'); return; }
+  const key = t==='k' ? 'kings' : 'queens';
+  const btn = document.getElementById(t+'addBtn');
+  if (btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
+  const newRef = rtdb.ref(key).push();
+  newRef.set({ name:n, number:num, votes:0, photo: camPhotos[t] || null }).then(()=>{
+    camPhotos[t] = null;
+    document.getElementById(t+'name').value='';
+    document.getElementById(t+'num').value='';
+    document.getElementById(t+'preview')?.classList.add('hidden');
+  }).catch(()=>{
+    alert('No se pudo guardar el candidato. Revisa tu conexión e intenta de nuevo.');
+  }).finally(()=>{
+    if (btn){ btn.disabled = false; btn.textContent = '➕ Agregar candidato'; }
+  });
+}
+function delCandidate(key,id){
+  if (confirm('¿Eliminar candidato? Esta acción no se puede deshacer.')){
+    rtdb.ref(key+'/'+id).remove();
+  }
+}
+
+/* ======================================================================
+   9) CONFIGURACIÓN DE LA ELECCIÓN
+   ====================================================================== */
+function eventPane(){
+  document.getElementById('event').innerHTML = `
+    <div class="card">
+      <h2>⚙️ Configuración de la elección</h2>
+      <label>Nombre del evento</label>
+      <input id="titleEdit" value="${esc(state.event.title)}">
+      <div class="actions">
+        <button class="gold" onclick="saveEvent()">Guardar nombre</button>
+        <button class="${state.event.open?'danger':'ok'}" onclick="toggleElection()">
+          ${state.event.open?'🔒 Cerrar votación':'🔓 Abrir votación'}
+        </button>
+        <button class="danger" onclick="resetVotes()">♻️ Reiniciar votos</button>
+      </div>
+      <p class="muted small">Al cerrar la elección, los votantes ya no podrán registrar votos desde ningún celular.</p>
+    </div>`;
+}
+function saveEvent(){
+  const title = document.getElementById('titleEdit').value.trim() || state.event.title;
+  rtdb.ref('event/title').set(title);
+}
+function toggleElection(){
+  rtdb.ref('event/open').set(!state.event.open);
+}
+function resetVotes(){
+  if (!confirm('Esto borrará TODOS los votos y votantes registrados. ¿Continuar?')) return;
+  const updates = {};
+  Object.keys(state.kings||{}).forEach(id => updates['kings/'+id+'/votes'] = 0);
+  Object.keys(state.queens||{}).forEach(id => updates['queens/'+id+'/votes'] = 0);
+  rtdb.ref().update(updates);
+  rtdb.ref('voters').remove();
+}
+
+/* ======================================================================
+   10) CÓDIGO QR DINÁMICO
+   El QR apunta siempre a window.location.href, así que al publicar en
+   Netlify/Vercel/GitHub Pages, automáticamente enlaza al dominio público
+   real sin tocar el código.
+   ====================================================================== */
+let qrRendered = false;
+function qrPane(){
+  document.getElementById('qr').innerHTML = `
+    <div class="card" style="text-align:center">
+      <h2>📱 QR de votación</h2>
+      <p class="muted">Los votantes escanean este código con su celular para ir directo a la pantalla de votación.</p>
+      <div id="qrcode" class="qrbox"></div>
+      <p class="small muted" id="qrUrlLabel"></p>
+      <button class="gold" onclick="downloadQR()">Descargar QR</button>
+    </div>`;
+  const voteUrl = location.href.split('#')[0] + '#voting';
+  document.getElementById('qrUrlLabel').textContent = voteUrl;
+  document.getElementById('qrcode').innerHTML = '';
+  new QRCode(document.getElementById('qrcode'), { text: voteUrl, width: 230, height: 230 });
+}
+function downloadQR(){
+  const img = document.querySelector('#qrcode img');
+  if (img){ const a=document.createElement('a'); a.href=img.src; a.download='QR-votacion.png'; a.click(); }
+}
+
+/* ======================================================================
+   11) EXPORTACIÓN DE DATOS A CSV
+   ====================================================================== */
+function dataPane(){
+  const totalVotantes = Object.keys(state.voters||{}).length;
+  document.getElementById('data').innerHTML = `
+    <div class="card">
+      <h2>🗂️ Exportar datos</h2>
+      <p class="muted">Descarga el conteo final de candidatos y la lista de votantes registrados (documento/código y hora de voto).</p>
+      <div class="statgrid" style="margin-bottom:16px">
+        <div class="stat"><span class="muted">Votantes registrados</span><b>${totalVotantes}</b></div>
+      </div>
+      <div class="actions">
+        <button class="gold" onclick="exportResultsCSV()">⬇️ Exportar resultados (CSV)</button>
+        <button class="gold" onclick="exportVotersCSV()">⬇️ Exportar votantes (CSV)</button>
+      </div>
+    </div>`;
+}
+function csvEscape(v){
+  const s = String(v ?? '');
+  return /[",\n;]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function downloadCSV(filename, rows){
+  const content = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF'+content], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+function exportResultsCSV(){
+  const rows = [['Categoría','Número','Nombre','Votos']];
+  Object.values(state.kings||{}).forEach(c => rows.push(['Rey', c.number, c.name, c.votes||0]));
+  Object.values(state.queens||{}).forEach(c => rows.push(['Reina', c.number, c.name, c.votes||0]));
+  downloadCSV('resultados_rey_reina.csv', rows);
+}
+function exportVotersCSV(){
+  const rows = [['Documento/Código','Rey votado','Reina votada','Fecha y hora']];
+  Object.entries(state.voters||{}).forEach(([id,v])=>{
+    const kName = state.kings?.[v.kingId]?.name || '—';
+    const qName = state.queens?.[v.queenId]?.name || '—';
+    const fecha = v.ts ? new Date(v.ts).toLocaleString('es-CO') : '—';
+    rows.push([id, kName, qName, fecha]);
+  });
+  downloadCSV('votantes_rey_reina.csv', rows);
+}
+
+/* ======================================================================
+   12) MODO PRESENTACIÓN / PANTALLA DE GANADORES + CONFETI
+   ====================================================================== */
+function openPresentation(){
+  const topK = topOf(state.kings||{}), topQ = topOf(state.queens||{});
+  document.getElementById('presTitle').textContent = state.event.title;
+  const kImg = document.getElementById('presKingImg'), qImg = document.getElementById('presQueenImg');
+  document.getElementById('presKingName').textContent = topK ? topK[1].name : 'Sin votos aún';
+  document.getElementById('presKingVotes').textContent = topK ? (topK[1].votes||0)+' votos' : '';
+  if (topK && topK[1].photo){ kImg.src = topK[1].photo; kImg.classList.remove('hidden'); } else kImg.classList.add('hidden');
+  document.getElementById('presQueenName').textContent = topQ ? topQ[1].name : 'Sin votos aún';
+  document.getElementById('presQueenVotes').textContent = topQ ? (topQ[1].votes||0)+' votos' : '';
+  if (topQ && topQ[1].photo){ qImg.src = topQ[1].photo; qImg.classList.remove('hidden'); } else qImg.classList.add('hidden');
+  document.getElementById('presentation').classList.remove('hidden');
+  fireConfetti();
+}
+function closePresentation(){
+  document.getElementById('presentation').classList.add('hidden');
+  if (document.fullscreenElement) document.exitFullscreen();
+}
+function requestPresFullscreen(){
+  document.getElementById('presentation').requestFullscreen?.();
+}
+function fireConfetti(){
+  const duration = 3000, end = Date.now() + duration;
+  (function frame(){
+    confetti({ particleCount: 6, angle: 60, spread: 65, origin: { x:0 }, colors:['#d4af37','#f3d878','#ffffff'] });
+    confetti({ particleCount: 6, angle: 120, spread: 65, origin: { x:1 }, colors:['#d4af37','#f3d878','#ffffff'] });
+    if (Date.now() < end) requestAnimationFrame(frame);
+  })();
+  confetti({ particleCount: 150, spread: 100, origin: { y:0.5 }, colors:['#d4af37','#f3d878','#ffffff'] });
+}
+
+/* ======================================================================
+   13) UTILIDADES
+   ====================================================================== */
+function esc(s){
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+/* ======================================================================
+   14) ARRANQUE
+   ====================================================================== */
+renderHome();
+if (location.hash === '#voting') show('voting');
+</script>
+</body>
+</html>
