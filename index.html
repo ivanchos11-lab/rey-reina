@@ -167,9 +167,9 @@ hr{border:none;border-top:1px solid var(--line);margin:18px 0}
 
   <div id="idStep" class="vote-step">
     <h2>🪪 Identifícate para votar</h2>
-    <p class="muted">Ingresa tu documento o código de acceso. Cada identificación solo puede votar una vez.</p>
-    <label>Documento / Código de acceso</label>
-    <input id="voterId" placeholder="Ej: 1029384756" autocomplete="off">
+    <p class="muted">Ingresa el código de acceso que te entregaron. Cada código solo puede votar una vez.</p>
+    <label>Código de acceso</label>
+    <input id="voterId" placeholder="Ej: A3F7K9" autocomplete="off">
     <div id="idError" class="error"></div>
     <button class="gold" onclick="startVoting()">Continuar</button>
   </div>
@@ -204,6 +204,7 @@ hr{border:none;border-top:1px solid var(--line);margin:18px 0}
  <div class="tabs">
   <button class="active" onclick="adminTab('dash',this)">📊 Resultados</button>
   <button onclick="adminTab('candidates',this)">👑 Candidatos</button>
+  <button onclick="adminTab('codes',this)">🎫 Códigos</button>
   <button onclick="adminTab('event',this)">⚙️ Elección</button>
   <button onclick="adminTab('qr',this)">📱 QR</button>
   <button onclick="adminTab('data',this)">🗂️ Datos</button>
@@ -211,6 +212,7 @@ hr{border:none;border-top:1px solid var(--line);margin:18px 0}
  </div>
  <div id="dash" class="adminpane"></div>
  <div id="candidates" class="adminpane hidden"></div>
+ <div id="codes" class="adminpane hidden"></div>
  <div id="event" class="adminpane hidden"></div>
  <div id="qr" class="adminpane hidden"></div>
  <div id="data" class="adminpane hidden"></div>
@@ -279,9 +281,10 @@ const rtdb = firebase.database();
 // Espejo local de lo que hay en Firebase (se actualiza vía listeners onValue)
 let state = {
   event: { title: 'Elección de Rey y Reina', open: true },
-  kings: {},   // { id: {name, number, photo, votes} }
-  queens: {},  // { id: {name, number, photo, votes} }
-  voters: {}   // { idSanitizado: {kingId, queenId, ts} }
+  kings: {},     // { id: {name, number, photo, votes} }
+  queens: {},    // { id: {name, number, photo, votes} }
+  voters: {},    // { codigoSanitizado: {kingId, queenId, ts} }
+  authCodes: {}  // { codigoSanitizado: true }  -> lista blanca de códigos autorizados a votar
 };
 
 let myVoterId = null;   // documento/código que la persona escribió en esta sesión
@@ -320,6 +323,11 @@ rtdb.ref('voters').on('value', snap => {
   refreshLiveViews();
 });
 
+rtdb.ref('authCodes').on('value', snap => {
+  state.authCodes = snap.val() || {};
+  refreshLiveViews();
+});
+
 function refreshLiveViews(){
   // Refresca cualquier vista que esté visible en este momento, sin recargar la página.
   // Importante: la pestaña "Candidatos" NO se reconstruye entera (updateCandidateLists
@@ -327,6 +335,7 @@ function refreshLiveViews(){
   // en curso cada vez que entra un voto nuevo desde otro celular.
   if (!document.getElementById('dash').classList.contains('hidden')) dash();
   if (!document.getElementById('candidates').classList.contains('hidden')) updateCandidateLists();
+  if (!document.getElementById('codes').classList.contains('hidden')) codesPane();
   if (!document.getElementById('data').classList.contains('hidden')) dataPane();
   if (!document.getElementById('voting').classList.contains('hidden') &&
       !document.getElementById('candStep').classList.contains('hidden')) renderVoting();
@@ -366,10 +375,14 @@ function startVoting(){
   const raw = document.getElementById('voterId').value.trim();
   const errEl = document.getElementById('idError');
   if (!state.event.open){ errEl.textContent='La votación está cerrada en este momento.'; return; }
-  if (!raw){ errEl.textContent='Ingresa tu documento o código de acceso.'; return; }
+  if (!raw){ errEl.textContent='Ingresa el código de acceso que te entregaron.'; return; }
   const id = sanitizeId(raw);
+  if (!state.authCodes[id]){
+    errEl.textContent = 'Código no válido. Verifica que sea exactamente el que te entregaron.';
+    return;
+  }
   if (state.voters[id]){
-    errEl.textContent = 'Este documento/código ya registró un voto anteriormente.';
+    errEl.textContent = 'Este código ya registró un voto anteriormente.';
     return;
   }
   errEl.textContent='';
@@ -406,6 +419,7 @@ function confirmVote(){
   errEl.textContent='';
   if (!state.event.open){ errEl.textContent='La votación está cerrada.'; return; }
   if (!myVoterId){ errEl.textContent='Debes identificarte primero.'; show('voting'); return; }
+  if (!state.authCodes[myVoterId]){ errEl.textContent='Tu código ya no es válido.'; show('voting'); return; }
   if (!selK || !selQ){ errEl.textContent='Debes seleccionar Rey y Reina.'; return; }
 
   const btn = document.getElementById('confirmVoteBtn');
@@ -419,7 +433,7 @@ function confirmVote(){
   }, (error, committed) => {
     btn.disabled = false; btn.textContent='Confirmar mi voto';
     if (error){ errEl.textContent='Ocurrió un error de conexión. Intenta nuevamente.'; return; }
-    if (!committed){ errEl.textContent='Este documento/código ya había votado.'; return; }
+    if (!committed){ errEl.textContent='Este código ya había votado.'; return; }
     // Solo si el voto del votante se registró con éxito, sumamos los conteos.
     rtdb.ref('kings/'+selK+'/votes').transaction(v => (v||0)+1);
     rtdb.ref('queens/'+selQ+'/votes').transaction(v => (v||0)+1);
@@ -451,6 +465,7 @@ function adminTab(id,btn){
 function renderAdmin(id){
   if (id==='dash') dash();
   if (id==='candidates') candidates();
+  if (id==='codes') codesPane();
   if (id==='event') eventPane();
   if (id==='qr') qrPane();
   if (id==='data') dataPane();
@@ -761,6 +776,105 @@ function delCandidate(key,id){
   if (confirm('¿Eliminar candidato? Esta acción no se puede deshacer.')){
     rtdb.ref(key+'/'+id).remove();
   }
+}
+
+/* ======================================================================
+   8B) CÓDIGOS DE ACCESO (lista blanca de votantes autorizados)
+   ----------------------------------------------------------------------
+   En vez de dejar que cada votante escriba cualquier documento (lo que
+   permitiría inventar números para votar varias veces), el administrador
+   genera de antemano un lote de códigos únicos, los reparte físicamente
+   (impresos o por WhatsApp), y solo esos códigos podrán votar —
+   validado contra el nodo 'authCodes' de Firebase.
+   ====================================================================== */
+function codesPane(){
+  const codes = Object.keys(state.authCodes||{}).sort();
+  const usados = codes.filter(c => state.voters && state.voters[c]).length;
+  document.getElementById('codes').innerHTML = `
+    <div class="card" style="margin-bottom:18px">
+      <h2>🎫 Generar códigos de acceso</h2>
+      <p class="muted">Genera un lote de códigos únicos para repartir. Solo quien tenga uno de estos códigos podrá votar.</p>
+      <div class="row" style="align-items:flex-end">
+        <div>
+          <label>Cantidad a generar</label>
+          <input id="codeQty" type="number" min="1" max="2000" value="200">
+        </div>
+        <button class="gold" onclick="generateCodes()">➕ Generar códigos</button>
+      </div>
+      <div class="statgrid" style="margin-top:14px">
+        <div class="stat"><span class="muted">Códigos generados</span><b>${codes.length}</b></div>
+        <div class="stat"><span class="muted">Ya usados</span><b>${usados}</b></div>
+        <div class="stat"><span class="muted">Disponibles</span><b>${codes.length-usados}</b></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>🗂️ Códigos generados</h2>
+      <div class="actions" style="margin-bottom:14px">
+        <button class="gold" onclick="printCodes()">🖨️ Imprimir fichas</button>
+        <button class="gold" onclick="downloadCodesCSV()">⬇️ Exportar CSV</button>
+        <button class="danger" onclick="resetCodes()">♻️ Borrar todos los códigos</button>
+      </div>
+      ${codes.length ? `<div style="max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px">
+        ${codes.map(c => `<span class="pill" style="margin:3px;display:inline-block;${state.voters&&state.voters[c]?'opacity:.4;text-decoration:line-through':''}">${esc(c)}</span>`).join('')}
+      </div>` : '<p class="muted">Todavía no has generado códigos.</p>'}
+    </div>`;
+}
+function randomCode(len=6){
+  // Sin caracteres ambiguos (0/O, 1/I) para que sean fáciles de leer en una ficha impresa
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i=0;i<len;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
+function generateCodes(){
+  const qty = Math.max(1, Math.min(2000, parseInt(document.getElementById('codeQty').value) || 0));
+  const existing = new Set(Object.keys(state.authCodes||{}));
+  const updates = {};
+  let created = 0;
+  let guard = 0; // evita bucle infinito si el espacio de códigos ya está casi agotado
+  while (created < qty && guard < qty*20){
+    guard++;
+    const code = randomCode();
+    if (existing.has(code)) continue;
+    existing.add(code);
+    updates[code] = true;
+    created++;
+  }
+  rtdb.ref('authCodes').update(updates).then(()=>{
+    alert(`✅ Se generaron ${created} códigos nuevos.`);
+  }).catch(()=>alert('No se pudieron guardar los códigos. Revisa tu conexión.'));
+}
+function resetCodes(){
+  if (confirm('¿Borrar TODOS los códigos generados? Esto no borra los votos ya emitidos, solo la lista de códigos disponibles.')){
+    rtdb.ref('authCodes').remove();
+  }
+}
+function downloadCodesCSV(){
+  const codes = Object.keys(state.authCodes||{}).sort();
+  const rows = [['Código','Usado']];
+  codes.forEach(c => rows.push([c, (state.voters&&state.voters[c]) ? 'Sí' : 'No']));
+  downloadCSV('codigos_acceso.csv', rows);
+}
+function printCodes(){
+  const codes = Object.keys(state.authCodes||{}).filter(c => !(state.voters&&state.voters[c])).sort();
+  if (!codes.length){ alert('No hay códigos disponibles para imprimir (o ya se usaron todos).'); return; }
+  const voteUrl = location.href.split('#')[0] + '#voting';
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fichas de votación</title>
+  <style>
+    body{font-family:sans-serif;margin:0;padding:10px}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+    .ticket{border:1.5px dashed #999;border-radius:10px;padding:10px;text-align:center}
+    .ticket b{font-size:20px;letter-spacing:2px;display:block;margin:6px 0}
+    .ticket span{font-size:10px;color:#555;word-break:break-all}
+    @media print{ .grid{grid-template-columns:repeat(4,1fr)} }
+  </style></head><body>
+  <div class="grid">
+    ${codes.map(c=>`<div class="ticket">👑 Rey &amp; Reina<b>${esc(c)}</b><span>${esc(voteUrl)}</span></div>`).join('')}
+  </div>
+  <script>window.print()<\/script>
+  </body></html>`);
+  win.document.close();
 }
 
 /* ======================================================================
