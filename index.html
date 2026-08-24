@@ -348,8 +348,10 @@ rtdb.ref('voters').on('value', snap => {
   refreshLiveViews();
 });
 
+let authCodesLoaded = false; // true en cuanto llega la primera respuesta de Firebase (aunque esté vacía)
 rtdb.ref('authCodes').on('value', snap => {
   state.authCodes = snap.val() || {};
+  authCodesLoaded = true;
   refreshLiveViews();
 });
 
@@ -1235,12 +1237,30 @@ const _codeFromUrl = new URLSearchParams(location.search).get('code');
 if (location.hash === '#voting' || _codeFromUrl){
   show('voting');
   if (_codeFromUrl){
-    // Viene de una ficha con QR personalizado: se salta el paso de escribir el código.
     document.getElementById('voterId').value = _codeFromUrl;
-    startVoting();
+    autoVoteFromUrl();
   }
 } else if (location.hash === '#resultados'){
   showPublicResults();
+}
+let _autoVoteRetries = 0;
+function autoVoteFromUrl(){
+  // Viene de una ficha con QR personalizado: se salta el paso de escribir el código.
+  // Pero si Firebase todavía no terminó de traer la lista de códigos válidos
+  // (típico justo al abrir el enlace desde el QR), esperamos un instante y
+  // reintentamos, para no rechazar por error un código que sí es válido.
+  if (!authCodesLoaded){
+    _autoVoteRetries++;
+    if (_autoVoteRetries > 40){ // ~10 segundos de espera máximo
+      document.getElementById('idError').textContent = 'No se pudo validar el código (sin conexión). Verifica tu internet e inténtalo de nuevo.';
+      return;
+    }
+    document.getElementById('idError').textContent = 'Validando código…';
+    setTimeout(autoVoteFromUrl, 250);
+    return;
+  }
+  document.getElementById('idError').textContent = '';
+  startVoting();
 }
 
 </script>
