@@ -955,29 +955,42 @@ function downloadCodesCSV(){
   codes.forEach(c => rows.push([c, (state.voters&&state.voters[c]) ? 'Sí' : 'No']));
   downloadCSV('codigos_acceso.csv', rows);
 }
+// Ambas hojas (frente y reverso) usan el mismo tamaño de página: 4 columnas x 5 filas
+// = 20 fichas por hoja, forzado explícitamente con salto de página. Así no depende de
+// cuánto "quepa" a ojo del navegador según la altura de cada tarjeta — página 1 del
+// frente siempre tiene las mismas 20 posiciones que página 1 del reverso.
+const TICKETS_PER_PAGE = 20;
+function chunkArray(arr, size){
+  const out = [];
+  for (let i=0;i<arr.length;i+=size) out.push(arr.slice(i, i+size));
+  return out;
+}
 function printCodes(){
   const codes = Object.keys(state.authCodes||{}).filter(c => !(state.voters&&state.voters[c])).sort();
   if (!codes.length){ alert('No hay códigos disponibles para imprimir (o ya se usaron todos).'); return; }
   // Cada ficha lleva un QR distinto: incluye el código en la URL (?code=XXXX), así que
   // al escanearlo la persona entra directo a elegir Rey y Reina, sin escribir nada.
   const base = location.origin + location.pathname;
+  const ticketHtmls = codes.map((c,i)=>`<div class="ticket">👑 Rey &amp; Reina<div class="qrwrap" id="qr${i}"></div><b>${esc(c)}</b></div>`);
+  const pagesHtml = chunkArray(ticketHtmls, TICKETS_PER_PAGE)
+    .map(group => `<div class="page"><div class="grid">${group.join('')}</div></div>`).join('');
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fichas de votación</title>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"><\/script>
   <style>
     body{font-family:sans-serif;margin:0;padding:10px}
     .total{font-size:12px;color:#666;margin-bottom:8px}
+    .page{page-break-after:always}
+    .page:last-child{page-break-after:auto}
     .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
     .ticket{border:1.5px dashed #999;border-radius:10px;padding:10px;text-align:center}
     .ticket b{font-size:16px;letter-spacing:2px;display:block;margin:6px 0}
     .qrwrap{display:flex;justify-content:center;margin:4px 0}
     .qrwrap img{width:100px;height:100px}
-    @media print{ .grid{grid-template-columns:repeat(4,1fr)} .ticket{break-inside:avoid} }
+    @media print{ .ticket{break-inside:avoid} }
   </style></head><body>
   <p class="total">Total: ${codes.length} fichas</p>
-  <div class="grid">
-    ${codes.map((c,i)=>`<div class="ticket">👑 Rey &amp; Reina<div class="qrwrap" id="qr${i}"></div><b>${esc(c)}</b></div>`).join('')}
-  </div>
+  ${pagesHtml}
   <script>
     var codes = ${JSON.stringify(codes)};
     var base = ${JSON.stringify(base)};
@@ -993,12 +1006,20 @@ function printCodes(){
   win.document.close();
 }
 function printCodesBack(){
-  // Mismo número de tarjetas que el frente (para que, al imprimir a doble cara,
-  // el reverso quede alineado detrás de cada ficha). El diseño es igual en todas,
-  // así que el logo se define UNA sola vez en el CSS (background-image) y se
-  // reutiliza por clase, en vez de repetir la imagen en cada tarjeta.
+  // Mismo número de tarjetas y misma paginación forzada (20 por hoja) que el frente,
+  // para que al imprimir a doble cara el reverso quede alineado detrás de cada ficha.
+  // El logo se define UNA sola vez en el CSS (background-image) y se reutiliza por
+  // clase, en vez de repetirlo en cada tarjeta.
   const codes = Object.keys(state.authCodes||{}).filter(c => !(state.voters&&state.voters[c]));
   if (!codes.length){ alert('No hay fichas disponibles (o ya se usaron todas).'); return; }
+  const ticketHtmls = codes.map(()=>`<div class="ticket-back">
+        <div class="backlogo"></div>
+        <b>¡Bienvenidos, compañeros y compañeras!</b>
+        <span>30 años · Promoción 96 · ITSC</span>
+        <span>14 nov 2026 · Club Infantas</span>
+      </div>`);
+  const pagesHtml = chunkArray(ticketHtmls, TICKETS_PER_PAGE)
+    .map(group => `<div class="page"><div class="grid">${group.join('')}</div></div>`).join('');
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reverso de fichas</title>
   <style>
@@ -1006,24 +1027,20 @@ function printCodesBack(){
        ya que por defecto muchos navegadores las omiten al imprimir. */
     *{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
     body{font-family:sans-serif;margin:0;padding:10px;background:#fff}
+    .total{font-size:12px;color:#666;margin-bottom:8px}
+    .page{page-break-after:always}
+    .page:last-child{page-break-after:auto}
     .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-    .ticket-back{border:1.5px dashed #999;border-radius:10px;padding:8px 6px;text-align:center;
-                 display:flex;flex-direction:column;align-items:center;justify-content:center}
-    .backlogo{width:112px;height:161px;background-image:url('data:image/png;base64,${REUNION_LOGO_B64}');
-              background-size:contain;background-repeat:no-repeat;background-position:center;margin-bottom:6px}
-    .ticket-back b{font-size:13px;color:#111;margin:3px 0 1px}
-    .ticket-back span{font-size:10px;color:#555;line-height:1.4}
-    @media print{ .grid{grid-template-columns:repeat(4,1fr)} .ticket-back{break-inside:avoid} }
+    .ticket-back{border:1.5px dashed #999;border-radius:10px;padding:6px 4px;text-align:center;
+                 display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden}
+    .backlogo{width:80px;height:115px;background-image:url('data:image/png;base64,${REUNION_LOGO_B64}');
+              background-size:contain;background-repeat:no-repeat;background-position:center;margin-bottom:4px;flex-shrink:0}
+    .ticket-back b{font-size:11px;color:#111;margin:2px 0 1px;line-height:1.2}
+    .ticket-back span{font-size:8.5px;color:#555;line-height:1.3}
+    @media print{ .ticket-back{break-inside:avoid} }
   </style></head><body>
-  <p style="font-size:12px;color:#666;margin:0 0 8px">Total: ${codes.length} fichas</p>
-  <div class="grid">
-    ${codes.map(()=>`<div class="ticket-back">
-        <div class="backlogo"></div>
-        <b>¡Bienvenidos, compañeros y compañeras!</b>
-        <span>30 años · Promoción 96 · ITSC</span>
-        <span>14 nov 2026 · Club Infantas</span>
-      </div>`).join('')}
-  </div>
+  <p class="total">Total: ${codes.length} fichas</p>
+  ${pagesHtml}
   <script>setTimeout(function(){ window.print(); }, 300);<\/script>
   </body></html>`);
   win.document.close();
