@@ -966,6 +966,7 @@ function printCodes(){
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"><\/script>
   <style>
     body{font-family:sans-serif;margin:0;padding:10px}
+    .total{font-size:12px;color:#666;margin-bottom:8px}
     .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
     .ticket{border:1.5px dashed #999;border-radius:10px;padding:10px;text-align:center}
     .ticket b{font-size:16px;letter-spacing:2px;display:block;margin:6px 0}
@@ -973,6 +974,7 @@ function printCodes(){
     .qrwrap img{width:100px;height:100px}
     @media print{ .grid{grid-template-columns:repeat(4,1fr)} .ticket{break-inside:avoid} }
   </style></head><body>
+  <p class="total">Total: ${codes.length} fichas</p>
   <div class="grid">
     ${codes.map((c,i)=>`<div class="ticket">👑 Rey &amp; Reina<div class="qrwrap" id="qr${i}"></div><b>${esc(c)}</b></div>`).join('')}
   </div>
@@ -1013,6 +1015,7 @@ function printCodesBack(){
     .ticket-back span{font-size:10px;color:#555;line-height:1.4}
     @media print{ .grid{grid-template-columns:repeat(4,1fr)} .ticket-back{break-inside:avoid} }
   </style></head><body>
+  <p style="font-size:12px;color:#666;margin:0 0 8px">Total: ${codes.length} fichas</p>
   <div class="grid">
     ${codes.map(()=>`<div class="ticket-back">
         <div class="backlogo"></div>
